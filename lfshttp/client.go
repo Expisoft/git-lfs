@@ -26,8 +26,10 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const MediaType = "application/vnd.git-lfs+json"
-const RequestContentType = MediaType + "; charset=utf-8"
+const (
+	MediaType          = "application/vnd.git-lfs+json"
+	RequestContentType = MediaType + "; charset=utf-8"
+)
 
 var (
 	UserAgent = "git-lfs"
@@ -633,7 +635,7 @@ func (e testEnv) Bool(key string, def bool) bool {
 
 func (e testEnv) All() map[string][]string {
 	m := make(map[string][]string)
-	for k, _ := range e {
+	for k := range e {
 		m[k] = e.GetAll(k)
 	}
 	return m

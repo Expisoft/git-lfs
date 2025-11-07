@@ -40,6 +40,7 @@ var sslCAInfoConfigHostNames = []string{
 	"git-lfs.local",
 	"git-lfs.local/",
 }
+
 var sslCAInfoMatchedHostTests = []struct {
 	hostName    string
 	shouldMatch bool
@@ -172,7 +173,7 @@ func TestCertFromSSLCAInfoEnvWithSchannelBackend(t *testing.T) {
 func TestCertFromSSLCAPathConfig(t *testing.T) {
 	tempdir := t.TempDir()
 
-	err := os.WriteFile(filepath.Join(tempdir, "cert1.pem"), []byte(testCert), 0644)
+	err := os.WriteFile(filepath.Join(tempdir, "cert1.pem"), []byte(testCert), 0o644)
 	assert.Nil(t, err, "Error creating cert file")
 
 	c, err := NewClient(NewContext(nil, nil, map[string]string{
@@ -191,7 +192,7 @@ func TestCertFromSSLCAPathConfig(t *testing.T) {
 func TestCertFromSSLCAPathEnv(t *testing.T) {
 	tempdir := t.TempDir()
 
-	err := os.WriteFile(filepath.Join(tempdir, "cert1.pem"), []byte(testCert), 0644)
+	err := os.WriteFile(filepath.Join(tempdir, "cert1.pem"), []byte(testCert), 0o644)
 	assert.Nil(t, err, "Error creating cert file")
 
 	c, err := NewClient(NewContext(nil, map[string]string{

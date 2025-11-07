@@ -12,11 +12,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/rubyist/tracerx"
 	"io"
 	"runtime"
 	"strings"
 	"unsafe"
+
+	"github.com/rubyist/tracerx"
 
 	"golang.org/x/sys/windows"
 )
@@ -187,8 +188,7 @@ func getRsaPssPadding(opts crypto.SignerOpts) (unsafe.Pointer, error) {
 
 // getClientCertForHostFromSchannel return a platform certificates used to client authentication based on sslcert "string"
 func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate, error) {
-	//var wincerts [] tls.Certificate
-
+	
 	configSslcert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
 
 	certParts := strings.SplitN(configSslcert, "\\", 3)
