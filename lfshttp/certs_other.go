@@ -9,5 +9,5 @@ import (
 
 // Just a stub on other os:es
 func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate, error) {
-	return nil, err
+	return nil, errors.New("Function not supported")
 }
