@@ -6,27 +6,25 @@ package lfshttp
 import (
 	"bytes"
 	"crypto"
-	"io"
-	"crypto/tls"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
-	"unsafe"
-	"errors"
-	"github.com/rubyist/tracerx"
-	"fmt"
-	"strings"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"github.com/rubyist/tracerx"
+	"io"
 	"runtime"
-	
+	"strings"
+	"unsafe"
+
 	"golang.org/x/sys/windows"
 )
 
 const (
-
 	nCryptSilentFlag   = 0x00000040 // ncrypt.h NCRYPT_SILENT_FLAG
 	bCryptPadPss       = 0x00000008 // bcrypt.h BCRYPT_PAD_PSS
 	supportedAlgorithm = tls.PSSWithSHA256
-
 )
 
 type DataBlob struct {
@@ -35,41 +33,72 @@ type DataBlob struct {
 }
 type CryptHashBlob DataBlob
 
+type SECURITY_STATUS uint32
+
+const ERROR_SUCCESS SECURITY_STATUS = 0
+
 var (
-	nCrypt         = windows.MustLoadDLL("ncrypt.dll")
-	nCryptSignHash = nCrypt.MustFindProc("NCryptSignHash")
+	nCrypt         = windows.NewLazySystemDLL("ncrypt.dll")
+	nCryptSignHash = nCrypt.NewProc("NCryptSignHash")
 )
 
-//
+// NCryptSignHash thin wrapper around NCryptSignHash.
+func NCryptSignHash(
+	hKey windows.Handle,
+	pPaddingInfo unsafe.Pointer,
+	pbHash *byte,
+	cbHash uint32,
+	pbSignature *byte,
+	cbSignature uint32,
+	pcbResult *uint32,
+	dwFlags uint32,
+) (SECURITY_STATUS, error) {
+	r0, _, e1 := nCryptSignHash.Call(
+		uintptr(hKey),
+		uintptr(pPaddingInfo),
+		uintptr(unsafe.Pointer(pbHash)),
+		uintptr(cbHash),
+		uintptr(unsafe.Pointer(pbSignature)),
+		uintptr(cbSignature),
+		uintptr(unsafe.Pointer(pcbResult)),
+		uintptr(dwFlags),
+	)
+	status := SECURITY_STATUS(r0)
+	if status != ERROR_SUCCESS {
+		// sometimes e1=nil or ERROR_SUCCESS despite error status; map from r0
+		if e1 == nil || e1 == windows.ERROR_SUCCESS {
+			e1 = windows.Errno(r0)
+		}
+		return status, e1
+	}
+	return status, nil
+}
+
 // WinKey holds a certContext pointing to a system certificate and private key
-//
 type WinKey struct {
-	certCtx			 *windows.CertContext
-	x509Cert     *x509.Certificate
+	certCtx  *windows.CertContext
+	x509Cert *x509.Certificate
 }
 
 // WinKeyClose is the finalizer for the WinKey certificate context
-//
-func WinKeyClose(t * WinKey) {
+func WinKeyClose(t *WinKey) {
 	windows.CertFreeCertificateContext(t.certCtx)
 }
 
-// WinKey::Public return the public key for this WinKey. We fake it by returning an empty key.
-// The caller of this function is mostly interested int eh type of key, RSA in our case
-//
+// WinKey::Public return the public key for this WinKey.
+
 func (t WinKey) Public() crypto.PublicKey {
-  tracerx.PrintfKey("SCHANNEL","schannel: crypto.PublicKey")
-  
-  if(t.x509Cert.PublicKey!=0) {
+	tracerx.PrintfKey("SCHANNEL", "schannel: crypto.PublicKey")
+
+	if t.x509Cert.PublicKey != 0 {
 		return t.x509Cert.PublicKey
-	} 
-	
+	}
+
 	return nil
 }
 
-
 func (k *WinKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	tracerx.PrintfKey("SCHANNEL","crypto.Signer.Sign with key type %T, opts type %T, hash %s\n", k.Public(), opts, opts.HashFunc().String())
+	tracerx.PrintfKey("SCHANNEL", "crypto.Signer.Sign with key type %T, opts type %T, hash %s\n", k.Public(), opts, opts.HashFunc().String())
 
 	// Get private key
 	var (
@@ -99,15 +128,15 @@ func (k *WinKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signa
 	// Sign the digest
 	// The first call to NCryptSignHash retrieves the size of the signature
 	var size uint32
-	success, _, _ := nCryptSignHash.Call(
-		uintptr(privateKey),
-		uintptr(pPaddingInfo),
-		uintptr(unsafe.Pointer(&digest[0])),
-		uintptr(len(digest)),
-		uintptr(0),
-		uintptr(0),
-		uintptr(unsafe.Pointer(&size)),
-		uintptr(flags),
+	success, _ := NCryptSignHash(
+		privateKey,
+		pPaddingInfo,
+		&digest[0],
+		uint32(len(digest)),
+		nil,
+		uint32(0),
+		&size,
+		uint32(flags),
 	)
 	if success != 0 {
 		return nil, fmt.Errorf("NCryptSignHash: failed to get signature length: %#x", success)
@@ -115,15 +144,15 @@ func (k *WinKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signa
 
 	// The second call to NCryptSignHash retrieves the signature
 	signature = make([]byte, size)
-	success, _, _ = nCryptSignHash.Call(
-		uintptr(privateKey),
-		uintptr(pPaddingInfo),
-		uintptr(unsafe.Pointer(&digest[0])),
-		uintptr(len(digest)),
-		uintptr(unsafe.Pointer(&signature[0])),
-		uintptr(size),
-		uintptr(unsafe.Pointer(&size)),
-		uintptr(flags),
+	success, _ = NCryptSignHash(
+		privateKey,
+		pPaddingInfo,
+		&digest[0],
+		uint32(len(digest)),
+		&signature[0],
+		uint32(size),
+		&size,
+		uint32(flags),
 	)
 	if success != 0 {
 		return nil, fmt.Errorf("NCryptSignHash: failed to generate signature: %#x", success)
@@ -156,26 +185,24 @@ func getRsaPssPadding(opts crypto.SignerOpts) (unsafe.Pointer, error) {
 	), nil
 }
 
-//
 // getClientCertForHostFromSchannel return a platform certificates used to client authentication based on sslcert "string"
-//
 func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate, error) {
 	//var wincerts [] tls.Certificate
 
-	configSslcert , _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
+	configSslcert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
 
-	certParts := strings.SplitN(configSslcert,"\\",3)
-	
-	tracerx.PrintfKey("SCHANNEL","schannel: Should get certiifcate %s",certParts[2])
-	
+	certParts := strings.SplitN(configSslcert, "\\", 3)
+
 	if len(certParts) != 3 {
-	  return nil , errors.New("Invalid sslcert format for schannel")
+		return nil, errors.New("Invalid sslcert format for schannel")
 	}
 
-	store, err := windows.CertOpenSystemStore(0,windows.StringToUTF16Ptr(certParts[1]))
+	tracerx.PrintfKey("SCHANNEL", "schannel: Should get certiifcate %s", certParts[2])
+
+	store, err := windows.CertOpenSystemStore(0, windows.StringToUTF16Ptr(certParts[1]))
 	if err != nil {
-		tracerx.PrintfKey("SCHANNEL","schannel: Failed to open cert store %s",certParts[1])
-		return nil,err
+		tracerx.PrintfKey("SCHANNEL", "schannel: Failed to open cert store %s", certParts[1])
+		return nil, err
 	}
 	defer windows.CertCloseStore(store, 0)
 
@@ -183,28 +210,27 @@ func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate,
 
 	find_type = windows.CERT_FIND_HASH
 	var hash CryptHashBlob
-	
-	data, err := hex.DecodeString(certParts[2]) 
+
+	data, err := hex.DecodeString(certParts[2])
 	if err != nil {
-			tracerx.PrintfKey("SCHANNEL","schannel: Error decoding %s",certParts[2])
-    	return nil,err
+		tracerx.PrintfKey("SCHANNEL", "schannel: Error decoding %s", certParts[2])
+		return nil, err
 	}
-	
-	
+
 	len := hex.DecodedLen(len(certParts[2]))
-		
+
 	hash.Size = uint32(len)
 	hash.Data = &data[0]
-	
-	tracerx.PrintfKey("SCHANNEL","schannel: Search for certificate")
-	
+
+	tracerx.PrintfKey("SCHANNEL", "schannel: Search for certificate")
+
 	var rv *windows.CertContext
 	var cert *windows.CertContext
-	
-	cert, err = windows.CertFindCertificateInStore(store, windows.X509_ASN_ENCODING | windows.PKCS_7_ASN_ENCODING,0, find_type,unsafe.Pointer(&hash), rv);	
-	
-	var wincert tls.Certificate;
-			
+
+	cert, err = windows.CertFindCertificateInStore(store, windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING, 0, find_type, unsafe.Pointer(&hash), rv)
+
+	var wincert tls.Certificate
+
 	// Copy the certificate data so that we have our own copy outside the windows context
 	encodedCert := unsafe.Slice(cert.EncodedCert, cert.Length)
 	buf := bytes.Clone(encodedCert)
@@ -212,28 +238,28 @@ func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate,
 	if err != nil {
 		return nil, err
 	}
-	
-	// Add the certificate to the wincert instance	
+
+	// Add the certificate to the wincert instance
 	wincert.Certificate = [][]byte{foundCert.Raw}
-	
+
 	// Create a new WinKey instance
 	winkey := new(WinKey)
-	
+
 	// Copy the certificate context since it will be overwritten in the next iteration
-	winkey.certCtx = windows.CertDuplicateCertificateContext(cert);
-	
+	winkey.certCtx = windows.CertDuplicateCertificateContext(cert)
+
 	// Save the certificate data
 	winkey.x509Cert = foundCert
 
 	// Tell the runtime to free the certificate context at GC
-	runtime.SetFinalizer(winkey,WinKeyClose)
-	
+	runtime.SetFinalizer(winkey, WinKeyClose)
+
 	// Setup the private key
 	wincert.PrivateKey = winkey
-	
-	wincert.SupportedSignatureAlgorithms = []tls.SignatureScheme{supportedAlgorithm} 
-		
-	tracerx.PrintfKey("SCHANNEL","schannel: Found certificate")
-	
-	return &wincert,err
+
+	wincert.SupportedSignatureAlgorithms = []tls.SignatureScheme{supportedAlgorithm}
+
+	tracerx.PrintfKey("SCHANNEL", "schannel: Found certificate")
+
+	return &wincert, err
 }

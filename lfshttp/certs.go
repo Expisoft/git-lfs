@@ -5,10 +5,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"runtime"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/git-lfs/git-lfs/v3/config"
 	"github.com/git-lfs/git-lfs/v3/errors"
@@ -35,19 +35,19 @@ func isClientCertEnabledForHost(c *Client, host string) bool {
 	_, hostSslCertOk := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslCert")
 
 	if hostSslKeyOk && hostSslCertOk {
-		return true;
+		return true
 	}
 
-	if runtime.GOOS == "windows" {	
+	if runtime.GOOS == "windows" {
 		configSslBackend, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslbackend")
-		configSslCert , _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
+		configSslCert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
 
 		if configSslBackend == "schannel" && configSslCert != "" {
-			return true;
+			return true
 		}
 	}
 
-	return false;
+	return false
 }
 
 // decryptPEMBlock decrypts an encrypted PEM block representing a private key,
@@ -90,13 +90,12 @@ func getClientCertForHost(c *Client, host string) (*tls.Certificate, error) {
 		configSslBackend, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslbackend")
 
 		if configSslBackend == "schannel" {
-			return getClientCertForHostFromSchannel(c,host)
+			return getClientCertForHostFromSchannel(c, host)
 		}
 	}
 
 	hostSslKey, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslKey")
 	hostSslCert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslCert")
-
 
 	hostSslKey, err := tools.ExpandPath(hostSslKey, false)
 	if err != nil {
