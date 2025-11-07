@@ -5,6 +5,8 @@ package lfshttp
 
 import (
 	"crypto/tls"
+
+	"github.com/git-lfs/git-lfs/v3/errors"
 )
 
 // Just a stub on other os:es
