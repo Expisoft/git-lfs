@@ -188,7 +188,6 @@ func getRsaPssPadding(opts crypto.SignerOpts) (unsafe.Pointer, error) {
 
 // getClientCertForHostFromSchannel return a platform certificates used to client authentication based on sslcert "string"
 func getClientCertForHostFromSchannel(c *Client, host string) (*tls.Certificate, error) {
-	
 	configSslcert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslcert")
 
 	certParts := strings.SplitN(configSslcert, "\\", 3)
